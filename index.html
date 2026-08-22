@@ -1,0 +1,1016 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MERIDIAN 2000 — CRT Login Terminal</title>
+<meta name="description" content="A 1990s beige CRT computer login screen rendered as a real 3D object in CSS.">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+
+<style>
+/* ============================================================================
+   1990s CRT LOGIN TERMINAL
+   ----------------------------------------------------------------------------
+   The monitor, stand and keyboard are real 3D solids: every box is assembled
+   from six separate face divs placed with rotateY/rotateX + translateZ inside a
+   `transform-style: preserve-3d` chain, then the whole group is yawed and
+   pitched under a single `perspective`. Nothing here is a flat rectangle with a
+   fake drop shadow.
+
+   COORDINATE SYSTEM (scene space, origin = centre of the stage)
+     +x -> right      +y -> DOWN (CSS convention)      +z -> toward the viewer
+     desk surface sits at y = 257
+     bezel   540 x 440 x 110  centred at (   0, -15,  145)
+     body    496 x 404 x 290  centred at (   0, -15,  -55)
+     stand   380 x  52 x 270  centred at (   0, 231,  -20)
+     keyboard 500 x 28 x 195  centred at ( 120, 243,  340)
+
+   LIGHTING
+     One key light, high and to the upper-LEFT, slightly in front of the object.
+     - top faces      -> lightest (they catch the most light)
+     - front faces    -> mid, with a left-to-right bright->dim gradient
+     - left side face -> darker overall, and it falls off from its front (lit)
+                         edge toward the back of the CRT
+     - bottom faces   -> darkest
+     Ground shadow is thrown down-and-to-the-right, matching that key light.
+============================================================================ */
+
+/* ---------------------------------------------------------------- tokens -- */
+:root {
+  /* --- camera ------------------------------------------------------------ */
+  --persp:    1700px;
+  --persp-x:  50%;
+  --persp-y:  14%;    /* eye sits above the top of the CRT so the top face reads */
+  --yaw:     -25deg;  /* 3/4 turn: front face + a full-depth right side panel   */
+  --pitch:   -10deg;  /* negative pitch = camera above -> top faces visible     */
+  --shift-x:  20px;
+  --shift-y: -150px;
+
+  /* The canvas is sized snugly around the projected silhouette; every px of
+     slack here is scale the object loses on a narrow screen.                  */
+  --canvas-w: 740px;
+  --canvas-h: 820px;
+  --s: 1;             /* uniform zoom, recalculated by JS to fit the viewport   */
+
+  /* --- beige plastic, shaded by facing ----------------------------------- */
+  /* On a .f-top the gradient's 0% edge is the BACK of the case and 100% is the
+     front lip, so 28deg puts the brightest value at the front-left corner —
+     where a high, front-left key light would actually land.                    */
+  --plastic-top:    linear-gradient(28deg,  #fbf4e3 0%,  #ece2c8 48%, #d2c8ab 100%);
+  --plastic-front:  linear-gradient(102deg, #e6ddc4 0%,  #d0c6a8 46%, #ab9f7d 100%);
+  /* On the side panel we actually see (.f-right) the gradient's 0% edge is the
+     FRONT of the monitor. So the flank is brightest where it meets the bezel
+     and falls away into shadow as the tube recedes — that fall-off is what
+     turns 290px of geometry into 290px of readable depth.                      */
+  --plastic-side:   linear-gradient(90deg,  #b3a78a 0%,  #8b8166 34%, #605944 72%, #3e392d 100%);
+  --plastic-side-far: linear-gradient(270deg, #a1957a 0%, #7d745e 45%, #5b5443 100%);
+  --plastic-back:   linear-gradient(180deg, #7a7159 0%,  #5d5544 100%);
+  --plastic-bottom: linear-gradient(180deg, #4a4437 0%,  #38332a 100%);
+
+  /* --- phosphor ---------------------------------------------------------- */
+  --green:      #5cff96;
+  --green-dim:  #2f8f57;
+  --green-mid:  #46cf78;
+  --red:        #ff5a48;
+  --term-fs:    24px;
+
+  --ink:   #efe9dc;
+  --muted: #8b8577;
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-family: "VT323", ui-monospace, "Courier New", monospace;
+  color: var(--ink);
+  background:
+    /* the key light itself, spilling in from the upper left */
+    radial-gradient(900px 620px at 14% -6%, rgba(255, 226, 172, .16), transparent 62%),
+    radial-gradient(1200px 900px at 50% 120%, rgba(60, 80, 92, .18), transparent 70%),
+    linear-gradient(178deg, #16151a 0%, #0d0c10 55%, #08080a 100%);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ------------------------------------------------------------ the stage -- */
+/* .stage reserves layout space; .stage-inner is a fixed-size canvas that is
+   scaled as a whole, so the 3D projection stays identical at every size.      */
+.stage {
+  position: relative;
+  width: 100%;
+  height: calc(var(--canvas-h) * var(--s));
+  overflow: visible;
+}
+
+.stage-inner {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width:  var(--canvas-w);
+  height: var(--canvas-h);
+  margin-left: calc(var(--canvas-w) / -2);
+  margin-top:  calc(var(--canvas-h) / -2);
+  transform: scale(var(--s));
+  transform-origin: 50% 50%;
+}
+
+/* The single perspective container. */
+.persp {
+  position: absolute;
+  inset: 0;
+  perspective: var(--persp);
+  perspective-origin: var(--persp-x) var(--persp-y);
+}
+
+/* The world. Everything inside shares this one yaw + pitch. */
+.scene {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  transform-style: preserve-3d;
+  transform:
+    translate3d(var(--shift-x), var(--shift-y), 0)
+    rotateX(var(--pitch))
+    rotateY(var(--yaw));
+}
+
+/* ------------------------------------------------------- generic 3D box -- */
+/* A .box is an invisible 3D anchor whose centre sits at the origin; its own
+   transform moves it into place. Faces are laid out relative to its box model
+   and then hinged outward with rotateY / rotateX + translateZ.                */
+.box {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width:  var(--w);
+  height: var(--h);
+  margin-left: calc(var(--w) / -2);
+  margin-top:  calc(var(--h) / -2);
+  transform-style: preserve-3d;
+}
+
+.face {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-style: flat;          /* leaf surface: its contents paint in 2D */
+  backface-visibility: hidden;
+  background-repeat: no-repeat;
+}
+
+/* Six hinged faces. Note that in Chrome's coordinate handedness a positive
+   rotateY swings a face's normal toward +x, so `.f-right` really is the
+   right-hand flank — and at this yaw it is the one the camera can see, while
+   `.f-left` is culled by backface-visibility. Shading follows that.           */
+.f-front  { width: var(--w); height: var(--h); transform: translateZ(calc(var(--d) /  2)); }
+.f-back   { width: var(--w); height: var(--h); transform: translateZ(calc(var(--d) / -2)) rotateY(180deg); }
+.f-left   { width: var(--d); height: var(--h); left: calc((var(--w) - var(--d)) / 2);
+            transform: rotateY(-90deg) translateZ(calc(var(--w) / 2)); }
+.f-right  { width: var(--d); height: var(--h); left: calc((var(--w) - var(--d)) / 2);
+            transform: rotateY(90deg)  translateZ(calc(var(--w) / 2)); }
+.f-top    { width: var(--w); height: var(--d); top: calc((var(--h) - var(--d)) / 2);
+            transform: rotateX(90deg)  translateZ(calc(var(--h) / 2)); }
+.f-bottom { width: var(--w); height: var(--d); top: calc((var(--h) - var(--d)) / 2);
+            transform: rotateX(-90deg) translateZ(calc(var(--h) / 2)); }
+
+/* default shading per facing ----------------------------------------------- */
+.f-front  { background-image: var(--plastic-front);
+            box-shadow: inset 0 1px 0 rgba(255, 252, 240, .5),
+                        inset 0 -2px 4px rgba(60, 48, 30, .22); }
+.f-top    { background-image: var(--plastic-top);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 248, .6); }
+/* .f-right is the flank the camera can see at this yaw; .f-left is culled. */
+.f-right  { background-image: var(--plastic-side);
+            /* bright rim exactly on the front vertical edge (the 0% side) ->
+               the strongest single cue that two planes meet at a corner */
+            box-shadow: inset 2px 0 0 rgba(255, 250, 232, .45),
+                        inset 0 1px 0 rgba(255, 250, 232, .18),
+                        inset 0 -18px 30px rgba(0, 0, 0, .28); }
+.f-left   { background-image: var(--plastic-side-far); }
+.f-back   { background-image: var(--plastic-back); }
+.f-bottom { background-image: var(--plastic-bottom); }
+
+/* ================================================================ MONITOR = */
+.monitor { position: absolute; left: 0; top: 0; width: 0; height: 0; transform-style: preserve-3d; }
+
+/* --- rear housing (the deep part of the CRT) ------------------------------ */
+.body {
+  /* only 17px narrower than the bezel per side, so almost the whole 290px
+     flank clears the bezel silhouette instead of hiding behind it */
+  --w: 506px; --h: 376px; --d: 290px;
+  transform: translate3d(0, -15px, -55px);
+}
+/* cooling slots on the top of the housing, running left-to-right.
+   NB: on a .f-top the local +Y axis points toward the FRONT of the monitor,
+   so `top: 0` here is the BACK of the case.                                   */
+.vents {
+  position: absolute;
+  left: 12%; right: 12%;
+  top: 10px; height: 104px;
+  background: repeating-linear-gradient(
+      180deg,
+      rgba(90, 78, 58, .55) 0 3px,
+      rgba(255, 255, 245, .30) 3px 4px,
+      transparent 4px 13px);
+  border-radius: 3px;
+}
+/* The housing's exposed flank is the money shot: 290px of real depth, falling
+   from a lit front edge into shadow at the back of the tube.                   */
+/* The housing's flank sits BEHIND the bezel, so it gets no second lit front
+   edge — it picks up where the bezel's flank left off and keeps darkening. */
+.body .f-right {
+  background-image: linear-gradient(90deg, #8b8166 0%, #695f4b 30%, #4a4436 70%, #322e25 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 250, 232, .14),
+              inset 3px 0 8px rgba(0, 0, 0, .32),
+              inset 0 -30px 46px rgba(0, 0, 0, .38);
+}
+.body .f-top   { background-image: linear-gradient(28deg, #f4ecd8 0%, #ddd3b7 55%, #c2b89b 100%); }
+
+/* --- front bezel --------------------------------------------------------- */
+/* The front of the bezel is NOT one panel: it is four strips forming a frame
+   with a real hole in it, so the glass can sit 30px further back inside.      */
+.bezel {
+  --w: 540px; --h: 440px; --d: 110px;
+  transform: translate3d(0, -15px, 145px);
+}
+
+.frame {
+  position: absolute;
+  transform: translateZ(55px);            /* flush with the front of the box */
+  background-image: var(--plastic-front);
+  box-shadow: inset 0 1px 0 rgba(255, 252, 240, .55),
+              inset 0 -1px 0 rgba(70, 58, 40, .20);
+}
+.frame-t { left: 0;     top: 0;     width: 540px; height:  62px; border-radius: 12px 12px 0 0; }
+.frame-b { left: 0;     top: 366px; width: 540px; height:  74px; border-radius: 0 0 12px 12px; }
+.frame-l { left: 0;     top: 62px;  width:  74px; height: 304px; }
+.frame-r { left: 466px; top: 62px;  width:  74px; height: 304px;
+           /* right-hand side of the front face is furthest from the key light */
+           background-image: linear-gradient(102deg, #cec3a2, #b8ac8b); }
+
+/* --- the recessed well: four inner walls between bezel face and glass ----- */
+/* Only the left and bottom walls actually face the camera; the other two are
+   culled by backface-visibility, exactly as they would be in reality.         */
+.well { position: absolute; background-repeat: no-repeat; backface-visibility: hidden; }
+/* The far wall of the well is the one the camera can see into. Its normal must
+   point INTO the recess (+x), which is rotateY(90deg); its 0% edge is the bezel
+   face and 100% is deep inside, right up against the glass — so it runs from a
+   lit mouth into shadow, which is exactly what says "this is a hole".          */
+.well-l { left: 59px;  top: 62px;  width: 30px;  height: 304px;
+          transform: translateZ(40px) rotateY(90deg);
+          background-image: linear-gradient(90deg, #8a806779 0%, #2b28207a 55%, #1c1a1580 100%),
+                            linear-gradient(90deg, #46402f, #211f18); }
+.well-r { left: 451px; top: 62px;  width: 30px;  height: 304px;
+          transform: translateZ(40px) rotateY(-90deg);
+          background-image: linear-gradient(270deg, #6b6350 0%, #423c30 100%); }
+.well-t { left: 74px;  top: 47px;  width: 392px; height: 30px;
+          transform: translateZ(40px) rotateX(-90deg);
+          background-image: linear-gradient(180deg, #423c30, #2f2b22); }
+.well-b { left: 74px;  top: 351px; width: 392px; height: 30px;
+          transform: translateZ(40px) rotateX(90deg);
+          /* floor of the well: faces up, so it catches both the key light and
+             a little phosphor bounce off the glass. 100% = the bezel face.     */
+          background-image: linear-gradient(180deg, #4f4a3b 0%, #6f6754 55%, #8d836a 100%); }
+
+/* --- bezel furniture ----------------------------------------------------- */
+.badge {
+  position: absolute;
+  left: 26px; top: 392px;
+  transform: translateZ(55.6px);
+  display: flex; align-items: center; gap: 7px;
+  font-size: 15px; letter-spacing: .16em;
+  color: #7d735c;
+  text-shadow: 0 1px 0 rgba(255, 253, 244, .75);
+}
+.badge i {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: radial-gradient(circle at 32% 28%, #cfc3a4, #6d6450);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 240, .35);
+  font-style: normal;
+}
+.leds {
+  position: absolute;
+  right: 24px; top: 396px;
+  transform: translateZ(55.6px);
+  display: flex; align-items: center; gap: 12px;
+}
+.led {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #43ff8a;
+  box-shadow: 0 0 7px 2px rgba(70, 255, 140, .8), inset 0 0 2px rgba(255, 255, 255, .9);
+}
+.knobs {
+  position: absolute;
+  right: 66px; top: 397px;
+  transform: translateZ(55.6px);
+  display: flex; gap: 9px;
+}
+.knob {
+  width: 24px; height: 7px; border-radius: 4px;
+  background: linear-gradient(180deg, #efe6cf, #b3a88b);
+  box-shadow: 0 1px 0 rgba(255, 255, 245, .6), inset 0 -1px 1px rgba(80, 68, 48, .35);
+}
+
+/* --- monitor stand / swivel base ----------------------------------------- */
+.stand {
+  --w: 424px; --h: 54px; --d: 280px;
+  transform: translate3d(0, 230px, -20px);
+}
+/* the pedestal lives in the monitor's own shadow, so everything reads darker */
+.stand .f-front { background-image: linear-gradient(102deg, #cec4a7, #a49879); }
+.stand .f-top   { background-image: linear-gradient(28deg, #c6bc9f, #9c9176); }
+.stand .f-right { background-image: linear-gradient(90deg, #9a8f74 0%, #635b49 55%, #413b30 100%); }
+
+/* =============================================================== KEYBOARD = */
+.keyboard {
+  --w: 500px; --h: 28px; --d: 195px;
+  transform: translate3d(120px, 243px, 340px);
+}
+.keyboard .f-top {
+  background-image: linear-gradient(28deg, #efe6cf 0%, #ddd2b6 55%, #c9be9f 100%);
+  padding: 11px 12px 12px;
+  display: flex; flex-direction: column; gap: 3px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 248, .7),
+              inset 0 0 22px rgba(120, 104, 76, .18);
+}
+.krow { display: flex; gap: 3px; flex: 1; }
+.krow.fn { flex: .82; }
+.key {
+  flex: 1 1 0;
+  border-radius: 2px 2px 3px 3px;
+  background: linear-gradient(178deg, #f3ecd9 0%, #e2d8bc 55%, #c8bd9e 100%);
+  box-shadow: 0 1.5px 0 rgba(126, 114, 90, .85),
+              inset 0 1px 0 rgba(255, 255, 250, .85);
+  display: flex; align-items: center; justify-content: center;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 7px;
+  color: rgba(92, 82, 62, .34);
+  overflow: hidden;
+  user-select: none;
+}
+.key.gap { background: none; box-shadow: none; }
+.kled { flex: 0 0 auto; display: flex; gap: 5px; align-items: center; padding-left: 6px; }
+.kled span {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: #2f4436; box-shadow: inset 0 0 2px rgba(0, 0, 0, .6);
+}
+.kled span.on { background: #4dff8f; box-shadow: 0 0 5px rgba(70, 255, 140, .8); }
+
+/* ============================================================ DESK + AO === */
+/* A real horizontal plane (rotateX(90deg) makes an up-facing floor), masked to
+   an ellipse so it fades out instead of ending in a hard rectangle.           */
+.desk {
+  position: absolute;
+  left: 0; top: 0;
+  width: 2000px; height: 1500px;
+  margin-left: -1000px; margin-top: -750px;
+  transform: translate3d(0, 257px, -160px) rotateX(90deg);
+  background:
+    /* pool of key light, thrown from the upper LEFT and slightly forward.
+       On a .f-top-style plane the local +Y axis points toward the viewer, so
+       "70%" here is the near edge of the desk.                                */
+    radial-gradient(ellipse 34% 30% at 34% 62%, rgba(255, 228, 176, .40), transparent 70%),
+    radial-gradient(ellipse 78% 70% at 52% 62%, rgba(196, 202, 212, .22), transparent 76%),
+    repeating-linear-gradient(93deg, rgba(255, 255, 255, .025) 0 2px, transparent 2px 11px),
+    linear-gradient(180deg, #262119 0%, #4d4437 42%, #3b3429 70%, #201c17 100%);
+  -webkit-mask-image: radial-gradient(ellipse 54% 50% at 48% 60%, #000 34%, transparent 84%);
+          mask-image: radial-gradient(ellipse 54% 50% at 48% 60%, #000 34%, transparent 84%);
+}
+
+/* Cast shadows live ON the desk plane (1-2px above it), thrown down-and-to-the
+   RIGHT and slightly back — i.e. directly opposite the upper-left key light.
+   They are stretched ellipses on a horizontal plane, so they foreshorten with
+   the desk rather than sitting under the object as a centred blob.            */
+.shadow {
+  position: absolute; left: 0; top: 0;
+  transform-origin: 50% 50%;
+  pointer-events: none;
+}
+/* long soft throw from the whole monitor mass */
+.shadow-monitor {
+  width: 980px; height: 760px; margin-left: -490px; margin-top: -380px;
+  transform: translate3d(150px, 255px, 4px) rotateX(90deg) rotate(-16deg);
+  background: radial-gradient(ellipse 33% 31% at 47% 50%,
+                rgba(0, 0, 0, .88) 0%, rgba(0, 0, 0, .55) 42%,
+                rgba(0, 0, 0, .24) 62%, transparent 80%);
+}
+/* tight, dark ambient-occlusion smudge where the pedestal meets the desk */
+.shadow-contact {
+  width: 470px; height: 330px; margin-left: -235px; margin-top: -165px;
+  transform: translate3d(14px, 256px, -18px) rotateX(90deg);
+  background: radial-gradient(ellipse 46% 46% at 50% 50%,
+                rgba(0, 0, 0, .95) 0%, rgba(0, 0, 0, .7) 44%,
+                rgba(0, 0, 0, .3) 66%, transparent 82%);
+}
+.shadow-keyboard {
+  width: 720px; height: 420px; margin-left: -360px; margin-top: -210px;
+  transform: translate3d(206px, 255px, 356px) rotateX(90deg) rotate(-16deg);
+  background: radial-gradient(ellipse 36% 30% at 47% 50%,
+                rgba(0, 0, 0, .8) 0%, rgba(0, 0, 0, .42) 48%, transparent 76%);
+}
+.shadow-keyboard-contact {
+  width: 470px; height: 240px; margin-left: -235px; margin-top: -120px;
+  transform: translate3d(126px, 256px, 342px) rotateX(90deg);
+  background: radial-gradient(ellipse 48% 44% at 50% 50%,
+                rgba(0, 0, 0, .9) 0%, rgba(0, 0, 0, .5) 50%, transparent 78%);
+}
+
+/* ================================================================ SCREEN == */
+.glass {
+  position: absolute;
+  left: 74px; top: 62px;
+  width: 392px; height: 296px;
+  transform: translateZ(25px);        /* 30px BEHIND the bezel face */
+  border-radius: 30px / 24px;          /* gentle CRT bulge */
+  overflow: hidden;
+  background: #04070500;
+  background-color: #050806;
+  box-shadow:
+    inset 0 0 26px rgba(0, 0, 0, .95),
+    inset 0 0 70px rgba(0, 0, 0, .7),
+    0 0 22px rgba(60, 255, 130, .07);
+  backface-visibility: hidden;
+}
+
+.crt { position: absolute; inset: 0; animation: powerflicker 11s linear infinite; }
+
+/* --- terminal text ------------------------------------------------------- */
+.term {
+  position: absolute;
+  inset: 14px 16px;
+  font-family: "VT323", ui-monospace, "Courier New", monospace;
+  font-size: var(--term-fs);
+  line-height: 1.25;
+  color: var(--green);
+  text-shadow: 0 0 5px rgba(90, 255, 150, .75), 0 0 16px rgba(40, 235, 110, .35);
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.term.centered {
+  display: flex; align-items: center; justify-content: center;
+  text-align: center;
+  inset: 14px 22px;
+}
+
+.line { min-height: 1.25em; }
+.line.dim     { color: var(--green-dim); text-shadow: 0 0 4px rgba(50, 190, 100, .4); }
+.line.head    { color: #b6ffcf; text-shadow: 0 0 8px rgba(140, 255, 190, .8); }
+.line.pending { color: var(--green-dim); text-shadow: 0 0 4px rgba(50, 190, 100, .4); }
+.line.done    { color: var(--green-mid); }
+.line.done .tick { color: #7dffae; text-shadow: 0 0 9px rgba(120, 255, 180, .9); }
+.line.ok      { color: #9dffc2; text-shadow: 0 0 10px rgba(140, 255, 190, .9); }
+.line.err     { color: var(--red); text-shadow: 0 0 8px rgba(255, 80, 60, .8); }
+.line.granted {
+  color: #d7ffe7;
+  letter-spacing: .1em;
+  text-shadow: 0 0 6px #6dff9f, 0 0 20px rgba(80, 255, 140, .8), 0 0 40px rgba(60, 230, 120, .5);
+}
+.line.final {
+  white-space: normal;
+  color: #c9ffdd;
+  text-shadow: 0 0 6px rgba(120, 255, 180, .85), 0 0 22px rgba(60, 235, 130, .5);
+}
+.echo { color: #d3ffe4; }
+/* VT323's bullet is a small glyph — a little tracking keeps a masked password
+   reading as a row of dots rather than an ellipsis. */
+.echo.masked { letter-spacing: .14em; }
+.cursor { color: #b7ffd2; animation: blink 1.05s steps(1, end) infinite; }
+
+/* --- CRT glass overlays -------------------------------------------------- */
+.scan {
+  position: absolute; inset: -14px 0;
+  background: repeating-linear-gradient(
+      180deg,
+      rgba(0, 0, 0, .40) 0 1.5px,
+      rgba(0, 0, 0, 0)  1.5px 3.5px);
+  animation: drift 7.5s linear infinite;
+  pointer-events: none;
+}
+.sweep {
+  position: absolute; left: 0; right: 0; height: 34%;
+  background: linear-gradient(180deg, transparent, rgba(140, 255, 190, .055) 48%, transparent);
+  animation: sweep 6.4s linear infinite;
+  pointer-events: none;
+}
+.vignette {
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse 76% 72% at 50% 48%,
+                transparent 52%, rgba(0, 0, 0, .5) 84%, rgba(0, 0, 0, .88) 100%);
+  pointer-events: none;
+}
+/* specular reflection on the glass — upper LEFT, agreeing with the key light */
+.glare {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse 46% 34% at 22% 14%, rgba(226, 244, 255, .075), transparent 68%),
+    linear-gradient(128deg, rgba(255, 255, 255, .045) 0 16%, transparent 42%);
+  pointer-events: none;
+}
+
+/* the invisible-but-real text input that drives the terminal */
+.capture {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  opacity: 0;
+  border: 0; outline: none; padding: 0;
+  background: transparent;
+  font-size: 16px;                 /* >=16px stops iOS zooming on focus */
+  color: transparent;
+  caret-color: transparent;
+  cursor: text;
+}
+
+/* --- boot flash ---------------------------------------------------------- */
+.crt.booting { animation: bootflash .5s steps(1, end) 1; }
+
+@keyframes bootflash {
+  0%   { opacity: 0; filter: brightness(4); }
+  12%  { opacity: 1; filter: brightness(3.2); }
+  26%  { opacity: .15; }
+  42%  { opacity: 1; filter: brightness(1.9); }
+  58%  { opacity: .35; }
+  100% { opacity: 1; filter: brightness(1); }
+}
+@keyframes powerflicker {
+  0%, 93.4%, 100% { opacity: 1; }
+  93.8%           { opacity: .74; }
+  94.2%           { opacity: 1; }
+  94.9%           { opacity: .86; }
+  95.3%           { opacity: 1; }
+}
+@keyframes drift  { from { transform: translateY(0); }  to { transform: translateY(3.5px); } }
+@keyframes sweep  { from { transform: translateY(-120%); } to { transform: translateY(320%); } }
+@keyframes blink  { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+
+/* ================================================================ caption = */
+.caption {
+  margin: 2px 0 0;
+  font-size: 19px;
+  letter-spacing: .05em;
+  color: var(--muted);
+  text-align: center;
+  padding: 0 16px;
+}
+.caption b { color: #b4ac9a; font-weight: 400; }
+
+/* =============================================================== responsive */
+/* Smaller viewports: ease off the yaw a little (less horizontal sprawl) and
+   push the terminal type up so it stays legible once everything is scaled.    */
+@media (max-width: 760px) {
+  :root {
+    --yaw: -17deg;
+    --pitch: -9deg;
+    --canvas-w: 740px;
+    --canvas-h: 800px;
+    --shift-x: -4px;
+    --term-fs: 28px;
+  }
+  .caption { font-size: 17px; }
+}
+@media (max-width: 420px) {
+  :root { --term-fs: 30px; }
+}
+
+/* ========================================================= reduced motion = */
+@media (prefers-reduced-motion: reduce) {
+  .crt, .crt.booting, .scan, .sweep, .cursor { animation: none !important; }
+  .sweep { display: none; }
+  .cursor { opacity: 1; }
+}
+</style>
+
+<div class="stage" id="stage">
+  <div class="stage-inner">
+    <div class="persp">
+      <div class="scene">
+
+        <!-- desk plane + cast shadows ---------------------------------- -->
+        <div class="desk"></div>
+        <div class="shadow shadow-monitor"></div>
+        <div class="shadow shadow-contact"></div>
+        <div class="shadow shadow-keyboard"></div>
+        <div class="shadow shadow-keyboard-contact"></div>
+
+        <!-- ========================= MONITOR ========================== -->
+        <div class="monitor">
+
+          <!-- rear housing: 290px of genuine CRT depth -->
+          <div class="box body">
+            <div class="face f-left"></div>
+            <div class="face f-right"></div>
+            <div class="face f-top"><div class="vents"></div></div>
+            <div class="face f-bottom"></div>
+            <div class="face f-back"></div>
+          </div>
+
+          <!-- front bezel: four strips around a real aperture -->
+          <div class="box bezel">
+            <div class="face f-left"></div>
+            <div class="face f-right"></div>
+            <div class="face f-top"></div>
+            <div class="face f-bottom"></div>
+
+            <div class="frame frame-t"></div>
+            <div class="frame frame-b"></div>
+            <div class="frame frame-l"></div>
+            <div class="frame frame-r"></div>
+
+            <!-- inner walls of the recess -->
+            <div class="well well-l"></div>
+            <div class="well well-r"></div>
+            <div class="well well-t"></div>
+            <div class="well well-b"></div>
+
+            <!-- the glass, sitting 30px back inside the housing -->
+            <div class="glass">
+              <div class="crt" id="crt">
+                <div class="term" id="term"></div>
+                <div class="sweep"></div>
+                <div class="scan"></div>
+                <div class="vignette"></div>
+                <div class="glare"></div>
+              </div>
+              <input class="capture" id="capture" type="text"
+                     autocomplete="off" autocapitalize="off" autocorrect="off"
+                     spellcheck="false" aria-label="Terminal input">
+            </div>
+
+            <!-- bezel furniture -->
+            <div class="badge"><i></i>MERIDIAN 2000</div>
+            <div class="knobs"><div class="knob"></div><div class="knob"></div></div>
+            <div class="leds"><div class="led"></div></div>
+          </div>
+
+          <!-- swivel base -->
+          <div class="box stand">
+            <div class="face f-front"></div>
+            <div class="face f-left"></div>
+            <div class="face f-right"></div>
+            <div class="face f-top"></div>
+            <div class="face f-back"></div>
+          </div>
+        </div>
+
+        <!-- ========================= KEYBOARD ========================= -->
+        <div class="box keyboard">
+          <div class="face f-front"></div>
+          <div class="face f-left"></div>
+          <div class="face f-right"></div>
+          <div class="face f-back"></div>
+          <div class="face f-top" id="keys"></div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<p class="caption">Click the screen to begin · demo credentials: <b>guest</b> / <b>1998</b></p>
+
+<script>
+(function () {
+  'use strict';
+
+  /* =====================================================================
+     0. environment
+     ===================================================================== */
+  var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  var CREDENTIALS = { username: 'guest', password: '1998' };
+  var CHECKS      = ['Checking', 'Validating', 'Authenticating', 'Processing'];
+  var MAX_LINES   = 80;
+  var STARTUP_MS  = 10000;   /* "Starting application..." dwell, per spec */
+
+  var term    = document.getElementById('term');
+  var crt     = document.getElementById('crt');
+  var capture = document.getElementById('capture');
+
+  /* state: idle -> boot -> username -> password -> busy -> done            */
+  var state   = 'idle';
+  var buffer  = '';        /* what the user has typed at the current prompt */
+  var masked  = false;
+  var echoEl  = null;
+  var cursorEl = null;
+  var username = '';
+
+  var sleep = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
+
+  /* =====================================================================
+     1. responsive fit — scale the fixed 3D canvas to the viewport
+     ===================================================================== */
+  function fit() {
+    var cs = getComputedStyle(document.documentElement);
+    var cw = parseFloat(cs.getPropertyValue('--canvas-w')) || 840;
+    var ch = parseFloat(cs.getPropertyValue('--canvas-h')) || 820;
+
+    var availW = window.innerWidth  - 28;
+    var availH = window.innerHeight - 92;   /* leave room for the caption */
+
+    var s = Math.min(1, availW / cw, availH / ch);
+    document.documentElement.style.setProperty('--s', Math.max(0.3, s).toFixed(4));
+  }
+  fit();
+  window.addEventListener('resize', fit, { passive: true });
+  window.addEventListener('orientationchange', function () { setTimeout(fit, 120); });
+
+  /* =====================================================================
+     2. keyboard geometry — generated so the markup stays readable
+        [label, flex units]; a null label makes an invisible spacer.
+     ===================================================================== */
+  var LAYOUT = [
+    { cls: 'fn', keys: [['Esc',1],[null,.6],['F1',1],['F2',1],['F3',1],['F4',1],[null,.5],
+                        ['F5',1],['F6',1],['F7',1],['F8',1],[null,.5],
+                        ['F9',1],['F10',1],['F11',1],['F12',1]] },
+    { keys: [['~',1],['1',1],['2',1],['3',1],['4',1],['5',1],['6',1],['7',1],['8',1],
+             ['9',1],['0',1],['-',1],['=',1],['Bksp',2]] },
+    { keys: [['Tab',1.5],['Q',1],['W',1],['E',1],['R',1],['T',1],['Y',1],['U',1],['I',1],
+             ['O',1],['P',1],['[',1],[']',1],['\\',1.5]] },
+    { keys: [['Caps',1.8],['A',1],['S',1],['D',1],['F',1],['G',1],['H',1],['J',1],['K',1],
+             ['L',1],[';',1],['\'',1],['Enter',2.2]] },
+    { keys: [['Shift',2.3],['Z',1],['X',1],['C',1],['V',1],['B',1],['N',1],['M',1],[',',1],
+             ['.',1],['/',1],['Shift',2.7]] },
+    { keys: [['Ctrl',1.4],['Alt',1.4],['',6.4],['Alt',1.4],['Ctrl',1.4],['←',1],['→',1]] }
+  ];
+
+  (function buildKeyboard() {
+    var host = document.getElementById('keys');
+    LAYOUT.forEach(function (row) {
+      var r = document.createElement('div');
+      r.className = 'krow' + (row.cls ? ' ' + row.cls : '');
+      row.keys.forEach(function (k) {
+        var el = document.createElement('div');
+        el.className = 'key' + (k[0] === null ? ' gap' : '');
+        el.style.flexGrow = k[1];
+        if (k[0]) el.textContent = k[0];
+        r.appendChild(el);
+      });
+      host.appendChild(r);
+    });
+    /* Num / Caps / Scroll lock lamps, tucked onto the function-key row */
+    var lamps = document.createElement('div');
+    lamps.className = 'kled';
+    lamps.innerHTML = '<span class="on"></span><span></span><span></span>';
+    host.firstChild.appendChild(lamps);
+  }());
+
+  /* =====================================================================
+     3. terminal primitives
+     ===================================================================== */
+  function addLine(text, cls) {
+    var el = document.createElement('div');
+    el.className = 'line' + (cls ? ' ' + cls : '');
+    if (text) el.textContent = text;
+    term.appendChild(el);
+    while (term.children.length > MAX_LINES) term.removeChild(term.firstChild);
+    term.scrollTop = term.scrollHeight;
+    return el;
+  }
+
+  /* character-by-character echo; instant when reduced motion is requested */
+  async function typeLine(text, cls, speed) {
+    var el = addLine('', cls);
+    if (reduced) { el.textContent = text; return el; }
+    for (var i = 0; i < text.length; i++) {
+      el.textContent += text.charAt(i);
+      term.scrollTop = term.scrollHeight;
+      await sleep(speed);
+    }
+    return el;
+  }
+
+  function clearScreen() {
+    term.innerHTML = '';
+    term.classList.remove('centered');
+  }
+
+  /* An input line:  "> guest█"  — echo span + blinking block cursor. */
+  function openPrompt(isMasked) {
+    var el = addLine('', 'prompt');
+    var caret = document.createElement('span');
+    caret.textContent = '> ';
+
+    echoEl = document.createElement('span');
+    echoEl.className = 'echo';
+
+    cursorEl = document.createElement('span');
+    cursorEl.className = 'cursor';
+    cursorEl.textContent = '█';
+
+    el.appendChild(caret);
+    el.appendChild(echoEl);
+    el.appendChild(cursorEl);
+
+    masked  = !!isMasked;
+    buffer  = '';
+    capture.value = '';
+    capture.type  = 'text';     /* kept as text; masking is done in the echo */
+    term.scrollTop = term.scrollHeight;
+    return el;
+  }
+
+  function closePrompt() {
+    if (cursorEl && cursorEl.parentNode) cursorEl.parentNode.removeChild(cursorEl);
+    cursorEl = null;
+    echoEl   = null;
+  }
+
+  function renderEcho() {
+    if (!echoEl) return;
+    echoEl.classList.toggle('masked', masked);
+    echoEl.textContent = masked
+      ? new Array(buffer.length + 1).join('•')
+      : buffer;
+    term.scrollTop = term.scrollHeight;
+  }
+
+  /* =====================================================================
+     4. boot sequence
+     ===================================================================== */
+  async function boot() {
+    state = 'boot';
+    clearScreen();
+
+    if (!reduced) {
+      crt.classList.remove('booting');
+      void crt.offsetWidth;              /* restart the animation */
+      crt.classList.add('booting');
+      await sleep(520);
+      crt.classList.remove('booting');
+    }
+
+    await typeLine('MERIDIAN 2000 BIOS v1.14', 'dim', 12);
+    await typeLine('(C) 1996 MERIDIAN SYSTEMS', 'dim', 9);
+    addLine('');
+    await typeLine('640K BASE MEMORY .... OK', 'dim', 7);
+    await typeLine('15360K EXT MEMORY ... OK', 'dim', 7);
+    await typeLine('IDE DRIVE C: ........ OK', 'dim', 7);
+    addLine('');
+    await typeLine('LOADING MERIDIAN/OS...', 'dim', 11);
+    await sleep(640);
+
+    clearScreen();
+    addLine('MERIDIAN/OS  RELEASE 3.11', 'head');
+    addLine('AUTHORIZED USE ONLY', 'dim');
+    addLine('');
+    askUsername();
+  }
+
+  /* =====================================================================
+     5. login loop
+     ===================================================================== */
+  function askUsername() {
+    addLine('Enter your Username:');
+    openPrompt(false);
+    state = 'username';
+    focusInput();
+  }
+
+  function askPassword() {
+    addLine('');
+    addLine('Enter your Password:');
+    openPrompt(true);
+    state = 'password';
+    focusInput();
+  }
+
+  async function submit() {
+    if (state === 'username') {
+      username = buffer;
+      closePrompt();
+      state = 'busy';
+      await sleep(200);
+      askPassword();
+      return;
+    }
+
+    if (state === 'password') {
+      var password = buffer;
+      closePrompt();
+      state = 'busy';
+      capture.value = '';
+      buffer = '';
+
+      await runChecks();
+
+      var ok = username.trim().toLowerCase() === CREDENTIALS.username &&
+               password === CREDENTIALS.password;
+      if (ok) { await grantAccess(); } else { await denyAccess(); }
+    }
+  }
+
+  /* Four sequential checks: each appears dim, then flips to a green tick. */
+  async function runChecks() {
+    addLine('');
+    for (var i = 0; i < CHECKS.length; i++) {
+      var name = CHECKS[i];
+      var el = addLine(name + '…', 'pending');
+      await sleep(460 + Math.random() * 320);
+      el.className = 'line done';
+      el.innerHTML = '<span class="tick">✓</span> ' + name + ' — done';
+      term.scrollTop = term.scrollHeight;
+      await sleep(140);
+    }
+    await sleep(260);
+  }
+
+  async function grantAccess() {
+    addLine('');
+    addLine('✓ Success', 'ok');
+    await sleep(520);
+    addLine('ACCESS GRANTED', 'granted');
+    await sleep(820);
+
+    var el   = addLine('Starting application', 'dim');
+    var dots = document.createElement('span');
+    el.appendChild(dots);
+
+    var n = 0;
+    var timer = setInterval(function () {
+      dots.textContent = new Array((n++ % 4) + 1).join('.');
+    }, 380);
+
+    await sleep(STARTUP_MS);
+    clearInterval(timer);
+
+    state = 'done';
+    window.location.href = 'app.html';
+  }
+
+  async function denyAccess() {
+    addLine('');
+    addLine('✗ Invalid Credentials', 'err');
+    await sleep(1200);
+    addLine('');
+    askUsername();          /* loop forever until the right pair arrives */
+  }
+
+  /* =====================================================================
+     6. input plumbing
+     ===================================================================== */
+  function focusInput() {
+    try { capture.focus({ preventScroll: true }); } catch (e) { capture.focus(); }
+  }
+
+  function accepting() { return state === 'username' || state === 'password'; }
+
+  capture.addEventListener('input', function () {
+    if (!accepting()) { capture.value = ''; return; }
+    var v = capture.value.replace(/[\r\n\t]/g, '').slice(0, 24);
+    if (v !== capture.value) capture.value = v;
+    buffer = v;
+    renderEcho();
+  });
+
+  capture.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (accepting()) submit();
+    }
+  });
+
+  /* First interaction anywhere powers the machine on. */
+  function wake() {
+    if (state === 'idle') { boot(); }
+    focusInput();
+  }
+
+  document.addEventListener('pointerdown', function () { wake(); });
+  document.addEventListener('keydown', function (e) {
+    if (state === 'idle' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault();
+      wake();
+    }
+  });
+  window.addEventListener('blur', function () { /* nothing — keep state */ });
+
+  /* =====================================================================
+     7. standby screen
+     ===================================================================== */
+  (function standby() {
+    addLine('MERIDIAN 2000', 'dim');
+    addLine('');
+    addLine('SYSTEM STANDBY', 'dim');
+    addLine('');
+    var el = addLine('', 'head');
+    var txt = document.createElement('span');
+    txt.textContent = 'PRESS ANY KEY ';
+    var cur = document.createElement('span');
+    cur.className = 'cursor';
+    cur.textContent = '█';
+    el.appendChild(txt);
+    el.appendChild(cur);
+  }());
+})();
+</script>

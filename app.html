@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MERIDIAN/OS — Application</title>
+<meta name="description" content="The destination screen reached after a successful MERIDIAN 2000 login.">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+/* ============================================================================
+   POST-LOGIN APPLICATION SCREEN
+   ----------------------------------------------------------------------------
+   Deliberately NOT a CRT: no bezel, no curvature, no scanlines, no glow-heavy
+   phosphor bloom. This is a flat, full-viewport modern screen that only borrows
+   the login terminal's palette cues — near-black ground, one green accent,
+   monospace type — so it reads as "the same product, a different surface".
+============================================================================ */
+
+:root {
+  --bg:      #0b0f0d;
+  --panel:   #111714;
+  --rule:    #1e2a24;
+  --ink:     #d7e3dc;
+  --muted:   #7d9188;
+  --accent:  #5cff96;
+
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,
+          "Courier New", monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+
+  /* very soft off-centre wash so the flat field isn't dead — no vignette,
+     nothing that suggests a curved tube */
+  background-image:
+    radial-gradient(1100px 700px at 22% -10%, rgba(92, 255, 150, .07), transparent 60%),
+    radial-gradient(900px 600px at 100% 110%, rgba(92, 255, 150, .045), transparent 62%);
+
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100svh;
+}
+
+/* ------------------------------------------------------------- app chrome -- */
+.appbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px clamp(16px, 4vw, 40px);
+  border-bottom: 1px solid var(--rule);
+  background: var(--panel);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px rgba(92, 255, 150, .55);
+}
+
+.session {
+  font-size: 12px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* ------------------------------------------------------------------ stage -- */
+main {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(32px, 8vw, 96px) clamp(20px, 6vw, 64px);
+  text-align: center;
+}
+
+.eyebrow {
+  margin: 0 0 clamp(18px, 3vw, 28px);
+  font-size: clamp(11px, 1.4vw, 13px);
+  letter-spacing: .34em;
+  text-transform: uppercase;
+  color: var(--accent);
+  opacity: .85;
+}
+
+.message {
+  margin: 0;
+  max-width: 22ch;
+  margin-inline: auto;
+  font-size: clamp(24px, 5.2vw, 46px);
+  font-weight: 500;
+  line-height: 1.28;
+  letter-spacing: -.005em;
+  text-wrap: balance;
+}
+
+.caret {
+  display: inline-block;
+  width: .58em;
+  margin-left: .12em;
+  transform: translateY(.04em);
+  background: var(--accent);
+  color: transparent;
+  animation: blink 1.05s steps(1, end) infinite;
+}
+
+@keyframes blink { 50% { opacity: 0; } }
+
+.sub {
+  margin: clamp(20px, 3.5vw, 32px) auto 0;
+  max-width: 46ch;
+  font-size: clamp(12px, 1.6vw, 14px);
+  color: var(--muted);
+}
+
+.sub a {
+  color: var(--accent);
+  text-decoration-color: rgba(92, 255, 150, .4);
+  text-underline-offset: 3px;
+}
+
+.sub a:hover { text-decoration-color: var(--accent); }
+
+/* ----------------------------------------------------------------- footer -- */
+footer {
+  flex: 0 0 auto;
+  padding: 14px clamp(16px, 4vw, 40px);
+  border-top: 1px solid var(--rule);
+  font-size: 11px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .caret { animation: none; }
+}
+</style>
+</head>
+<body>
+
+<header class="appbar">
+  <div class="brand"><span class="dot" aria-hidden="true"></span> Meridian/OS</div>
+  <div class="session">Session active</div>
+</header>
+
+<main>
+  <div>
+    <p class="eyebrow">Application</p>
+    <h1 class="message">This is where you shall be directed after login.<span class="caret" aria-hidden="true">_</span></h1>
+    <p class="sub">Authentication complete — the terminal handed the session off to this screen. <a href="index.html">Return to the login terminal</a>.</p>
+  </div>
+</main>
+
+<footer>
+  <span>Release 3.11</span>
+  <span>Authorized use only</span>
+</footer>
+
+</body>
+</html>
