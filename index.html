@@ -1,6 +1,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>MERIDIAN 2000 — CRT Login Terminal</title>
+<title>PRASHU 2006 — CRT Login Terminal</title>
 <meta name="description" content="A 1990s beige CRT computer login screen rendered as a real 3D object in CSS.">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -23,7 +23,7 @@
      bezel   540 x 440 x 110  centred at (   0, -15,  145)
      body    496 x 404 x 290  centred at (   0, -15,  -55)
      stand   380 x  52 x 270  centred at (   0, 231,  -20)
-     keyboard 500 x 28 x 195  centred at ( 120, 243,  340)
+     keyboard 500 x 28 x 195  centred at (   0, 243,  340)
 
    LIGHTING
      One key light, high and to the upper-LEFT, slightly in front of the object.
@@ -45,6 +45,11 @@
   --pitch:   -10deg;  /* negative pitch = camera above -> top faces visible     */
   --shift-x:  20px;
   --shift-y: -150px;
+
+  /* cursor-tracking nudge, added on top of --yaw/--pitch by JS below;
+     stays at 0deg (no effect) when prefers-reduced-motion is set.          */
+  --pointer-yaw:   0deg;
+  --pointer-pitch: 0deg;
 
   /* The canvas is sized snugly around the projected silhouette; every px of
      slack here is scale the object loses on a narrow screen.                  */
@@ -141,8 +146,8 @@ body {
   transform-style: preserve-3d;
   transform:
     translate3d(var(--shift-x), var(--shift-y), 0)
-    rotateX(var(--pitch))
-    rotateY(var(--yaw));
+    rotateX(calc(var(--pitch) + var(--pointer-pitch)))
+    rotateY(calc(var(--yaw) + var(--pointer-yaw)));
 }
 
 /* ------------------------------------------------------- generic 3D box -- */
@@ -335,7 +340,7 @@ body {
 /* =============================================================== KEYBOARD = */
 .keyboard {
   --w: 500px; --h: 28px; --d: 195px;
-  transform: translate3d(120px, 243px, 340px);
+  transform: translate3d(0, 243px, 340px);
 }
 .keyboard .f-top {
   background-image: linear-gradient(28deg, #efe6cf 0%, #ddd2b6 55%, #c9be9f 100%);
@@ -415,13 +420,13 @@ body {
 }
 .shadow-keyboard {
   width: 720px; height: 420px; margin-left: -360px; margin-top: -210px;
-  transform: translate3d(206px, 255px, 356px) rotateX(90deg) rotate(-16deg);
+  transform: translate3d(86px, 255px, 356px) rotateX(90deg) rotate(-16deg);
   background: radial-gradient(ellipse 36% 30% at 47% 50%,
                 rgba(0, 0, 0, .8) 0%, rgba(0, 0, 0, .42) 48%, transparent 76%);
 }
 .shadow-keyboard-contact {
   width: 470px; height: 240px; margin-left: -235px; margin-top: -120px;
-  transform: translate3d(126px, 256px, 342px) rotateX(90deg);
+  transform: translate3d(6px, 256px, 342px) rotateX(90deg);
   background: radial-gradient(ellipse 48% 44% at 50% 50%,
                 rgba(0, 0, 0, .9) 0%, rgba(0, 0, 0, .5) 50%, transparent 78%);
 }
@@ -648,7 +653,7 @@ body {
             </div>
 
             <!-- bezel furniture -->
-            <div class="badge"><i></i>MERIDIAN 2000</div>
+            <div class="badge"><i></i>PRASHU 2006</div>
             <div class="knobs"><div class="knob"></div><div class="knob"></div></div>
             <div class="leds"><div class="led"></div></div>
           </div>
@@ -724,6 +729,48 @@ body {
   fit();
   window.addEventListener('resize', fit, { passive: true });
   window.addEventListener('orientationchange', function () { setTimeout(fit, 120); });
+
+  /* =====================================================================
+     1b. cursor-driven parallax — the whole scene "looks" toward the mouse.
+         A target angle is derived straight from cursor position, then eased
+         toward with a lerp each frame so it feels fluid, never 1:1 snappy.
+         Disabled entirely under prefers-reduced-motion (angles stay at 0).
+     ===================================================================== */
+  if (!reduced) {
+    var MAX_YAW   = 8;   /* deg, applied on top of the base --yaw   */
+    var MAX_PITCH = 4;   /* deg, applied on top of the base --pitch */
+    var EASE      = 0.06;
+
+    var targetYaw = 0, targetPitch = 0;
+    var curYaw    = 0, curPitch    = 0;
+    var root      = document.documentElement;
+
+    /* While the cursor is over the computer itself, stop feeding new target
+       angles: the in-flight lerp below settles at whatever angle it was
+       already easing toward, instead of snapping still. Tracking resumes
+       the moment the pointer leaves, easing back out the same way.        */
+    var hovering = false;
+    document.querySelectorAll('.monitor, .keyboard').forEach(function (el) {
+      el.addEventListener('mouseenter', function () { hovering = true; });
+      el.addEventListener('mouseleave', function () { hovering = false; });
+    });
+
+    window.addEventListener('mousemove', function (e) {
+      if (hovering) return;
+      var nx = (e.clientX / window.innerWidth)  * 2 - 1;  /* -1 .. 1 */
+      var ny = (e.clientY / window.innerHeight) * 2 - 1;  /* -1 .. 1 */
+      targetYaw   = nx * MAX_YAW;
+      targetPitch = ny * MAX_PITCH;
+    }, { passive: true });
+
+    (function tick() {
+      curYaw   += (targetYaw   - curYaw)   * EASE;
+      curPitch += (targetPitch - curPitch) * EASE;
+      root.style.setProperty('--pointer-yaw',   curYaw.toFixed(3)   + 'deg');
+      root.style.setProperty('--pointer-pitch', curPitch.toFixed(3) + 'deg');
+      requestAnimationFrame(tick);
+    })();
+  }
 
   /* =====================================================================
      2. keyboard geometry — generated so the markup stays readable
@@ -850,18 +897,18 @@ body {
       crt.classList.remove('booting');
     }
 
-    await typeLine('MERIDIAN 2000 BIOS v1.14', 'dim', 12);
-    await typeLine('(C) 1996 MERIDIAN SYSTEMS', 'dim', 9);
+    await typeLine('PRASHU 2006 BIOS v1.14', 'dim', 12);
+    await typeLine('(C) 1996 PRASHU SYSTEMS', 'dim', 9);
     addLine('');
     await typeLine('640K BASE MEMORY .... OK', 'dim', 7);
     await typeLine('15360K EXT MEMORY ... OK', 'dim', 7);
     await typeLine('IDE DRIVE C: ........ OK', 'dim', 7);
     addLine('');
-    await typeLine('LOADING MERIDIAN/OS...', 'dim', 11);
+    await typeLine('LOADING PRASHU/OS...', 'dim', 11);
     await sleep(640);
 
     clearScreen();
-    addLine('MERIDIAN/OS  RELEASE 3.11', 'head');
+    addLine('PRASHU/OS  RELEASE 3.11', 'head');
     addLine('AUTHORIZED USE ONLY', 'dim');
     addLine('');
     askUsername();
@@ -999,7 +1046,7 @@ body {
      7. standby screen
      ===================================================================== */
   (function standby() {
-    addLine('MERIDIAN 2000', 'dim');
+    addLine('PRASHU 2006', 'dim');
     addLine('');
     addLine('SYSTEM STANDBY', 'dim');
     addLine('');
